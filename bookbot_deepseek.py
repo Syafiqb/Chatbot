@@ -6,21 +6,10 @@ import requests
 from chatterbot import ChatBot
 from chatterbot.trainers import ListTrainer
 
-# --- File config.py (Buat file terpisah) ---
-"""
-Buat file baru bernama config.py di folder yang sama dengan kode ini,
-dan isi dengan:
-
-DEEPSEEK_API_KEY = "sk-53766a2d8e7e49df8fbf2319a17b3a2f"
-"""
-
-# --- Konfigurasi DeepSeek API ---
 try:
-    # Coba import dari config.py
     try:
         from config import DEEPSEEK_API_KEY
     except ImportError:
-        # Fallback ke environment variable
         DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
     
     if not DEEPSEEK_API_KEY:
@@ -30,14 +19,12 @@ try:
         2. Atur environment variable DEEPSEEK_API_KEY
         """)
     
-    # Konfigurasi API
     DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
     DEEPSEEK_HEADERS = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    # Riwayat percakapan
     conversation_history = [
         {"role": "system", "content": "Anda adalah BookBot, asisten yang ramah dan membantu yang merekomendasikan buku dan bisa mengobrol tentang apa saja. Jaga respons Anda tetap ringkas dan ramah."},
         {"role": "assistant", "content": "Halo! Saya BookBot. Ada yang bisa saya bantu?"}
@@ -47,9 +34,8 @@ except Exception as e:
     print(f"Error saat inisialisasi DeepSeek: {e}")
     DEEPSEEK_API_KEY = None
 
-# --- Pengaturan ChatterBot ---
 BookBot = ChatBot(
-    "BookBotHybrid",
+    "BookBot",
     read_only=True,
     logic_adapters=[
         {
@@ -60,21 +46,23 @@ BookBot = ChatBot(
     ]
 )
 
-# Pelatihan dasar
 basic_convo = [
-    "hi", "Halo! Saya BookBot. Saya bisa merekomendasikan buku atau mengobrol tentang apa saja.",
+    "hi", "Halo! Saya BookBot. Saya bisa merekomendasikan buku.",
     "halo", "Hai! Ada yang bisa saya bantu?",
-    "siapa namamu?", "Saya BookBot, asisten hibrida Anda!",
+    "siapa namamu?", "Saya BookBot.",
     "apa yang kamu lakukan?", "Saya merekomendasikan buku dan menjawab pertanyaan Anda dengan bantuan DeepSeek AI.",
     "terima kasih", "Sama-sama! Senang bisa membantu!",
-    "bye", "Sampai jumpa! Selamat membaca!"
+    "bye", "Sampai jumpa! Selamat membaca!",
+    "apa kabar?", "Saya baik! Terima kasih sudah bertanya.",
+    "kamu bisa apa?", "Saya bisa merekomendasikan buku dan menjawab pertanyaan seputar buku.",
+    "buku apa yang bagus?", "Ada banyak! Misalnya 'Sapiens' untuk non-fiksi, atau 'Harry Potter' untuk fantasi.",
 ]
+
 
 list_trainer = ListTrainer(BookBot)
 list_trainer.train(basic_convo)
 print("Pelatihan dasar selesai.")
 
-# --- Data Buku ---
 try:
     books_df = pd.read_csv('books.csv', encoding='latin1', on_bad_lines='skip')
 except FileNotFoundError:
@@ -95,7 +83,6 @@ if not books_df.empty:
         print("Peringatan: Kolom yang dibutuhkan tidak lengkap.")
         books_df = pd.DataFrame()
 
-# --- Fungsi Utama ---
 def get_deepseek_response(user_input):
     if not DEEPSEEK_API_KEY:
         return "Maaf, koneksi ke DeepSeek API tidak tersedia."
@@ -127,22 +114,32 @@ def get_book_recommendation(genre=None, author=None, min_rating=None):
         return "Maaf, database buku kosong."
 
     filtered = books_df.copy()
-    if genre:
-        filtered = filtered[filtered['title'].str.contains(genre, case=False, na=False)]
+    
+
+    # Filter berdasarkan author (jika ada)
     if author:
         filtered = filtered[filtered['authors'].str.contains(author, case=False, na=False)]
+    
+    # Filter berdasarkan rating (jika ada)
     if min_rating:
-        filtered = filtered[filtered['average_rating'] >= min_rating]
-
+        filtered = filtered[filtered['average_rating'] >= float(min_rating)]
+    
+    # Jika masih ada hasil, kembalikan rekomendasi acak
     if not filtered.empty:
-        book = filtered.sample(1).iloc[0]
-        return f"Saya merekomendasikan '{book['title']}' oleh {book['authors']} (⭐ {book['average_rating']:.2f}/5)"
-    return "Maaf, tidak ada buku yang cocok."
+        # Ambil 3 buku acak dengan rating tertinggi
+        recommended = filtered.nlargest(10, 'average_rating').sample(3)
+        books_list = []
+        for _, row in recommended.iterrows():
+            books_list.append(
+                f"- {row['title']} oleh {row['authors']} (Rating: {row['average_rating']}/5)"
+            )
+        return "Berikut beberapa rekomendasi untuk Anda:\n" + "\n".join(books_list)
+    
+    return "Maaf, tidak ada buku yang cocok dengan kriteria Anda."
 
 def handle_recommendation(query):
     query = query.lower()
     
-    # Ekstrak parameter
     rating = re.search(r'(?:rating|minimal)\s*([0-9.]+)', query)
     author = re.search(r'(?:oleh|karya)\s+([a-z .]+)', query)
     genres = ['fantasy', 'sci-fi', 'romance', 'mystery', 'non-fiction']
@@ -154,7 +151,6 @@ def handle_recommendation(query):
         min_rating=float(rating.group(1)) if rating else None
     )
 
-# --- Loop Chat ---
 print("\nBookBot📚: Halo! Saya BookBot. Tanya apa saja!")
 print("Contoh: 'Rekomendasikan buku fantasi rating 4.5' atau 'Jelaskan teori relativitas'")
 print("Ketik 'quit' untuk keluar\n")
